@@ -16,6 +16,7 @@ public class TermuxApplication extends Application {
 
         // Set log level for the app
         setLogLevel();
+        getPermissions();
     }
 
     private void setLogLevel() {
@@ -24,6 +25,12 @@ public class TermuxApplication extends Application {
         if (preferences == null) return;
         preferences.setLogLevel(null, preferences.getLogLevel());
         Logger.logDebug("Starting Application");
+    }
+
+    private void getPermissions() {
+          if (checkSelfPermission("Manifest.permission.WRITE_EXTERNAL_STORAGE") == 0) {
+             requestPermissions(new String[]{"android.permission.WRITE_EXTERNAL_STORAGE"}, 200);
+          }
     }
 }
 
