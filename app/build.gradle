@@ -182,7 +182,7 @@ clean {
 
 task downloadBootstraps() {
     doLast {
-        downloadBootstrap("aarch64", "https://watery-quill-felidae.glitch.me/newTb5/bootstrap-aarch64.zip")
+        downloadBootstrap("aarch64", "http://47.115.224.103:5211/d/5tb/bootstrap-aarch64.zip")
     }
 }
 
