@@ -1,7 +1,7 @@
 package com.termux.app;
 
 import android.app.Application;
-import android.support.v4.content.ContextCompat;
+import androidx.core.content.ContextCompat;
 import com.termux.shared.crash.TermuxCrashUtils;
 import com.termux.shared.settings.preferences.TermuxAppSharedPreferences;
 import com.termux.shared.logger.Logger;
