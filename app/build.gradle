@@ -182,7 +182,7 @@ clean {
 
 task downloadBootstraps() {
     doLast {
-        downloadBootstrap("aarch64", "http://47.115.224.103:5211/d/5tb/bootstrap-aarch64.zip")
+        downloadBootstrap("aarch64", "https://github.com/zhlhlf/termux_apk/releases/download/421/bootstrap-aarch64.zip")
     }
 }
 
