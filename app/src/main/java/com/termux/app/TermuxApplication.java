@@ -1,6 +1,7 @@
 package com.termux.app;
 
 import android.app.Application;
+import android.app.Activity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import com.termux.shared.crash.TermuxCrashUtils;
@@ -30,7 +31,7 @@ public class TermuxApplication extends Application {
 
     private void getPermissions() {
         if (ContextCompat.checkSelfPermission(this, "Manifest.permission.WRITE_EXTERNAL_STORAGE") == 0) {
-            ActivityCompat.requestPermissions(this,new String[]{"android.permission.WRITE_EXTERNAL_STORAGE"}, 200);
+            ActivityCompat.requestPermissions(new Activity(),new String[]{"android.permission.WRITE_EXTERNAL_STORAGE"}, 200);
         }
     }
 }
