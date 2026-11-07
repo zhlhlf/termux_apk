@@ -2,6 +2,7 @@ package com.termux.view;
 
 import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
+import android.app.Activity;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
@@ -10,6 +11,7 @@ import android.graphics.Typeface;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.TextUtils;
@@ -19,17 +21,20 @@ import android.view.HapticFeedbackConstants;
 import android.view.InputDevice;
 import android.view.KeyCharacterMap;
 import android.view.KeyEvent;
+import android.view.Menu;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.ViewTreeObserver;
 import android.view.accessibility.AccessibilityManager;
+import android.view.autofill.AutofillManager;
 import android.view.autofill.AutofillValue;
 import android.view.inputmethod.BaseInputConnection;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import android.widget.Scroller;
 
+import androidx.annotation.Nullable;
 import androidx.annotation.RequiresApi;
 
 import com.termux.terminal.KeyHandler;
@@ -81,7 +86,50 @@ public final class TerminalView extends View {
     /** If non-zero, this is the last unicode code point received if that was a combining character. */
     int mCombiningAccent;
 
+    /**
+     * The current AutoFill type returned for {@link View#getAutofillType()} by {@link #getAutofillType()}.
+     *
+     * The default is {@link #AUTOFILL_TYPE_NONE} so that AutoFill UI, like toolbar above keyboard
+     * is not shown automatically, like on Activity starts/View create. This value should be updated
+     * to required value, like {@link #AUTOFILL_TYPE_TEXT} before calling
+     * {@link AutofillManager#requestAutofill(View)} so that AutoFill UI shows. The updated value
+     * set will automatically be restored to {@link #AUTOFILL_TYPE_NONE} in
+     * {@link #autofill(AutofillValue)} so that AutoFill UI isn't shown anymore by calling
+     * {@link #resetAutoFill()}.
+     */
+    @RequiresApi(api = Build.VERSION_CODES.O)
+    private int mAutoFillType = AUTOFILL_TYPE_NONE;
+
+    /**
+     * The current AutoFill type returned for {@link View#getImportantForAutofill()} by
+     * {@link #getImportantForAutofill()}.
+     *
+     * The default is {@link #IMPORTANT_FOR_AUTOFILL_NO} so that view is not considered important
+     * for AutoFill. This value should be updated to required value, like
+     * {@link #IMPORTANT_FOR_AUTOFILL_YES} before calling {@link AutofillManager#requestAutofill(View)}
+     * so that Android and apps consider the view as important for AutoFill to process the request.
+     * The updated value set will automatically be restored to {@link #IMPORTANT_FOR_AUTOFILL_NO} in
+     * {@link #autofill(AutofillValue)} by calling {@link #resetAutoFill()}.
+     */
+    @RequiresApi(api = Build.VERSION_CODES.O)
+    private int mAutoFillImportance = IMPORTANT_FOR_AUTOFILL_NO;
+
+    /**
+     * The current AutoFill hints returned for {@link View#getAutofillHints()} ()} by {@link #getAutofillHints()} ()}.
+     *
+     * The default is an empty `string[]`. This value should be updated to required value. The
+     * updated value set will automatically be restored an empty `string[]` in
+     * {@link #autofill(AutofillValue)} by calling {@link #resetAutoFill()}.
+     */
+    private String[] mAutoFillHints = new String[0];
+
     private final boolean mAccessibilityEnabled;
+
+    /** The {@link KeyEvent} is generated from a virtual keyboard, like manually with the {@link KeyEvent#KeyEvent(int, int)} constructor. */
+    public final static int KEY_EVENT_SOURCE_VIRTUAL_KEYBOARD = KeyCharacterMap.VIRTUAL_KEYBOARD; // -1
+
+    /** The {@link KeyEvent} is generated from a non-physical device, like if 0 value is returned by {@link KeyEvent#getDeviceId()}. */
+    public final static int KEY_EVENT_SOURCE_SOFT_KEYBOARD = 0;
 
     private static final String LOG_TAG = "TerminalView";
 
@@ -241,11 +289,13 @@ public final class TerminalView extends View {
      */
     public boolean attachSession(TerminalSession session) {
         if (session == mTermSession) return false;
-        mTopRow = 0;
 
         mTermSession = session;
         mEmulator = null;
         mCombiningAccent = 0;
+
+        // The emulator's cached value will be read in `updateSize()` when emulator is set.
+        setTopRow(0, false);
 
         updateSize();
 
@@ -380,7 +430,7 @@ public final class TerminalView extends View {
                         }
                     }
 
-                    inputCodePoint(codePoint, ctrlHeld, false);
+                    inputCodePoint(KEY_EVENT_SOURCE_SOFT_KEYBOARD, codePoint, ctrlHeld, false);
                 }
             }
 
@@ -403,22 +453,31 @@ public final class TerminalView extends View {
     }
 
     public void onScreenUpdated() {
+        onScreenUpdated(false);
+    }
+
+    public void onScreenUpdated(boolean skipScrolling) {
         if (mEmulator == null) return;
 
         int rowsInHistory = mEmulator.getScreen().getActiveTranscriptRows();
-        if (mTopRow < -rowsInHistory) mTopRow = -rowsInHistory;
+        if (mTopRow < -rowsInHistory) setTopRow(-rowsInHistory);
 
-        boolean skipScrolling = false;
-        if (isSelectingText()) {
+        if (isSelectingText() || mEmulator.isAutoScrollDisabled()) {
             // Do not scroll when selecting text.
             int rowShift = mEmulator.getScrollCounter();
             if (-mTopRow + rowShift > rowsInHistory) {
                 // .. unless we're hitting the end of history transcript, in which
                 // case we abort text selection and scroll to end.
-                stopTextSelectionMode();
+                if (isSelectingText())
+                    stopTextSelectionMode();
+
+                if (mEmulator.isAutoScrollDisabled()) {
+                    setTopRow(-rowsInHistory);
+                    skipScrolling = true;
+                }
             } else {
                 skipScrolling = true;
-                mTopRow -= rowShift;
+                setTopRow(mTopRow - rowShift);
                 decrementYTextSelectionCursors(rowShift);
             }
         }
@@ -431,13 +490,21 @@ public final class TerminalView extends View {
                 // of one row at a time.
                 awakenScrollBars();
             }
-            mTopRow = 0;
+            setTopRow(0);
         }
 
         mEmulator.clearScrollCounter();
 
         invalidate();
         if (mAccessibilityEnabled) setContentDescription(getText());
+    }
+
+    /** This must be called by the hosting activity in {@link Activity#onContextMenuClosed(Menu)}
+     * when context menu for the {@link TerminalView} is started by
+     * {@link TextSelectionCursorController#ACTION_MORE} is closed. */
+    public void onContextMenuClosed(Menu menu) {
+        // Unset the stored text since it shouldn't be used anymore and should be cleared from memory
+        unsetStoredSelectedText();
     }
 
     /**
@@ -516,7 +583,7 @@ public final class TerminalView extends View {
                 // e.g. less, which shifts to the alt screen without mouse handling.
                 handleKeyCode(up ? KeyEvent.KEYCODE_DPAD_UP : KeyEvent.KEYCODE_DPAD_DOWN, 0);
             } else {
-                mTopRow = Math.min(0, Math.max(-(mEmulator.getScreen().getActiveTranscriptRows()), mTopRow + (up ? -1 : 1)));
+                setTopRow(Math.min(0, Math.max(-(mEmulator.getScreen().getActiveTranscriptRows()), mTopRow + (up ? -1 : 1))));
                 if (!awakenScrollBars()) invalidate();
             }
         }
@@ -550,11 +617,14 @@ public final class TerminalView extends View {
                 if (action == MotionEvent.ACTION_DOWN) showContextMenu();
                 return true;
             } else if (event.isButtonPressed(MotionEvent.BUTTON_TERTIARY)) {
-                ClipboardManager clipboard = (ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
-                ClipData clipData = clipboard.getPrimaryClip();
+                ClipboardManager clipboardManager = (ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
+                ClipData clipData = clipboardManager.getPrimaryClip();
                 if (clipData != null) {
-                    CharSequence paste = clipData.getItemAt(0).coerceToText(getContext());
-                    if (!TextUtils.isEmpty(paste)) mEmulator.paste(paste.toString());
+                    ClipData.Item clipItem = clipData.getItemAt(0);
+                    if (clipItem != null) {
+                        CharSequence text = clipItem.coerceToText(getContext());
+                        if (!TextUtils.isEmpty(text)) mEmulator.paste(text.toString());
+                    }
                 }
             } else if (mEmulator.isMouseTrackingActive()) { // BUTTON_PRIMARY.
                 switch (event.getAction()) {
@@ -578,6 +648,7 @@ public final class TerminalView extends View {
         if (TERMINAL_VIEW_KEY_LOGGING_ENABLED)
             mClient.logInfo(LOG_TAG, "onKeyPreIme(keyCode=" + keyCode + ", event=" + event + ")");
         if (keyCode == KeyEvent.KEYCODE_BACK) {
+            cancelRequestAutoFill();
             if (isSelectingText()) {
                 stopTextSelectionMode();
                 return true;
@@ -712,6 +783,8 @@ public final class TerminalView extends View {
         } else if (event.getAction() == KeyEvent.ACTION_MULTIPLE && keyCode == KeyEvent.KEYCODE_UNKNOWN) {
             mTermSession.write(event.getCharacters());
             return true;
+        } else if (keyCode == KeyEvent.KEYCODE_LANGUAGE_SWITCH) {
+            return super.onKeyDown(keyCode, event);
         }
 
         final int metaState = event.getMetaState();
@@ -755,7 +828,7 @@ public final class TerminalView extends View {
         if ((result & KeyCharacterMap.COMBINING_ACCENT) != 0) {
             // If entered combining accent previously, write it out:
             if (mCombiningAccent != 0)
-                inputCodePoint(mCombiningAccent, controlDown, leftAltDown);
+                inputCodePoint(event.getDeviceId(), mCombiningAccent, controlDown, leftAltDown);
             mCombiningAccent = result & KeyCharacterMap.COMBINING_ACCENT_MASK;
         } else {
             if (mCombiningAccent != 0) {
@@ -763,7 +836,7 @@ public final class TerminalView extends View {
                 if (combinedChar > 0) result = combinedChar;
                 mCombiningAccent = 0;
             }
-            inputCodePoint(result, controlDown, leftAltDown);
+            inputCodePoint(event.getDeviceId(), result, controlDown, leftAltDown);
         }
 
         if (mCombiningAccent != oldCombiningAccent) invalidate();
@@ -771,9 +844,9 @@ public final class TerminalView extends View {
         return true;
     }
 
-    public void inputCodePoint(int codePoint, boolean controlDownFromEvent, boolean leftAltDownFromEvent) {
+    public void inputCodePoint(int eventSource, int codePoint, boolean controlDownFromEvent, boolean leftAltDownFromEvent) {
         if (TERMINAL_VIEW_KEY_LOGGING_ENABLED) {
-            mClient.logInfo(LOG_TAG, "inputCodePoint(codePoint=" + codePoint + ", controlDownFromEvent=" + controlDownFromEvent + ", leftAltDownFromEvent="
+            mClient.logInfo(LOG_TAG, "inputCodePoint(eventSource=" + eventSource + ", codePoint=" + codePoint + ", controlDownFromEvent=" + controlDownFromEvent + ", leftAltDownFromEvent="
                 + leftAltDownFromEvent + ")");
         }
 
@@ -813,19 +886,22 @@ public final class TerminalView extends View {
         }
 
         if (codePoint > -1) {
-            // Work around bluetooth keyboards sending funny unicode characters instead
-            // of the more normal ones from ASCII that terminal programs expect - the
-            // desire to input the original characters should be low.
-            switch (codePoint) {
-                case 0x02DC: // SMALL TILDE.
-                    codePoint = 0x007E; // TILDE (~).
-                    break;
-                case 0x02CB: // MODIFIER LETTER GRAVE ACCENT.
-                    codePoint = 0x0060; // GRAVE ACCENT (`).
-                    break;
-                case 0x02C6: // MODIFIER LETTER CIRCUMFLEX ACCENT.
-                    codePoint = 0x005E; // CIRCUMFLEX ACCENT (^).
-                    break;
+            // If not virtual or soft keyboard.
+            if (eventSource > KEY_EVENT_SOURCE_SOFT_KEYBOARD) {
+                // Work around bluetooth keyboards sending funny unicode characters instead
+                // of the more normal ones from ASCII that terminal programs expect - the
+                // desire to input the original characters should be low.
+                switch (codePoint) {
+                    case 0x02DC: // SMALL TILDE.
+                        codePoint = 0x007E; // TILDE (~).
+                        break;
+                    case 0x02CB: // MODIFIER LETTER GRAVE ACCENT.
+                        codePoint = 0x0060; // GRAVE ACCENT (`).
+                        break;
+                    case 0x02C6: // MODIFIER LETTER CIRCUMFLEX ACCENT.
+                        codePoint = 0x005E; // CIRCUMFLEX ACCENT (^).
+                        break;
+                }
             }
 
             // If left alt, send escape before the code point to make e.g. Alt+B and Alt+F work in readline:
@@ -839,11 +915,34 @@ public final class TerminalView extends View {
         if (mEmulator != null)
             mEmulator.setCursorBlinkState(true);
 
+        if (handleKeyCodeAction(keyCode, keyMod))
+            return true;
+
         TerminalEmulator term = mTermSession.getEmulator();
         String code = KeyHandler.getCode(keyCode, keyMod, term.isCursorKeysApplicationMode(), term.isKeypadApplicationMode());
         if (code == null) return false;
         mTermSession.write(code);
         return true;
+    }
+
+    public boolean handleKeyCodeAction(int keyCode, int keyMod) {
+        boolean shiftDown = (keyMod & KeyHandler.KEYMOD_SHIFT) != 0;
+
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_PAGE_UP:
+            case KeyEvent.KEYCODE_PAGE_DOWN:
+                // shift+page_up and shift+page_down should scroll scrollback history instead of
+                // scrolling command history or changing pages
+                if (shiftDown) {
+                    long time = SystemClock.uptimeMillis();
+                    MotionEvent motionEvent = MotionEvent.obtain(time, time, MotionEvent.ACTION_DOWN, 0, 0, 0);
+                    doScroll(motionEvent, keyCode == KeyEvent.KEYCODE_PAGE_UP ? -mEmulator.mRows : mEmulator.mRows);
+                    motionEvent.recycle();
+                    return true;
+                }
+        }
+
+       return false;
     }
 
     /**
@@ -893,7 +992,7 @@ public final class TerminalView extends View {
         int newRows = Math.max(4, (viewHeight - mRenderer.mFontLineSpacingAndAscent) / mRenderer.mFontLineSpacing);
 
         if (mEmulator == null || (newColumns != mEmulator.mColumns || newRows != mEmulator.mRows)) {
-            mTermSession.updateSize(newColumns, newRows);
+            mTermSession.updateSize(newColumns, newRows, (int) mRenderer.getFontWidth(), mRenderer.getFontLineSpacing());
             mEmulator = mTermSession.getEmulator();
             mClient.onEmulatorSet();
 
@@ -901,7 +1000,19 @@ public final class TerminalView extends View {
             if (mTerminalCursorBlinkerRunnable != null)
                 mTerminalCursorBlinkerRunnable.setEmulator(mEmulator);
 
-            mTopRow = 0;
+            // Restore cached top row value if session/emulator was switched back from a
+            // different session or after activity restart. The top row value also needs to be
+            // maintained after opening/closing soft keyboard.
+            int topRow = 0;
+            if (mEmulator != null) {
+                int rowsInHistory = mEmulator.getScreen().getActiveTranscriptRows();
+                int cachedTopRow = mEmulator.getTopRow();
+                if (cachedTopRow >= -rowsInHistory) {
+                    topRow = cachedTopRow;
+                }
+            }
+            setTopRow(topRow);
+
             scrollTo(0, 0);
             invalidate();
         }
@@ -956,8 +1067,15 @@ public final class TerminalView extends View {
         return mTopRow;
     }
 
-    public void setTopRow(int mTopRow) {
-        this.mTopRow = mTopRow;
+    public void setTopRow(int topRow) {
+        setTopRow(topRow, true);
+    }
+
+    public void setTopRow(int topRow, boolean updateEmulator) {
+        mTopRow = topRow;
+        if (updateEmulator && mEmulator != null) {
+            mEmulator.setTopRow(mTopRow);
+        }
     }
 
 
@@ -971,12 +1089,20 @@ public final class TerminalView extends View {
         if (value.isText()) {
             mTermSession.write(value.getTextValue().toString());
         }
+
+        resetAutoFill();
     }
 
     @RequiresApi(api = Build.VERSION_CODES.O)
     @Override
     public int getAutofillType() {
-        return AUTOFILL_TYPE_TEXT;
+        return mAutoFillType;
+    }
+
+    @RequiresApi(api = Build.VERSION_CODES.O)
+    @Override
+    public String[] getAutofillHints() {
+        return mAutoFillHints;
     }
 
     @RequiresApi(api = Build.VERSION_CODES.O)
@@ -984,6 +1110,95 @@ public final class TerminalView extends View {
     public AutofillValue getAutofillValue() {
         return AutofillValue.forText("");
     }
+
+    @RequiresApi(api = Build.VERSION_CODES.O)
+    @Override
+    public int getImportantForAutofill() {
+        return mAutoFillImportance;
+    }
+
+    @RequiresApi(api = Build.VERSION_CODES.O)
+    private synchronized void resetAutoFill() {
+        // Restore none type so that AutoFill UI isn't shown anymore.
+        mAutoFillType = AUTOFILL_TYPE_NONE;
+        mAutoFillImportance = IMPORTANT_FOR_AUTOFILL_NO;
+        mAutoFillHints = new String[0];
+    }
+
+    public AutofillManager getAutoFillManagerService() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return null;
+
+        try {
+            Context context = getContext();
+            if (context == null) return null;
+            return context.getSystemService(AutofillManager.class);
+        } catch (Exception e) {
+            mClient.logStackTraceWithMessage(LOG_TAG, "Failed to get AutofillManager service", e);
+            return null;
+        }
+    }
+
+    public boolean isAutoFillEnabled() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false;
+
+        try {
+            AutofillManager autofillManager = getAutoFillManagerService();
+            return autofillManager != null && autofillManager.isEnabled();
+        } catch (Exception e) {
+            mClient.logStackTraceWithMessage(LOG_TAG, "Failed to check if Autofill is enabled", e);
+            return false;
+        }
+    }
+
+    public synchronized void requestAutoFillUsername() {
+        requestAutoFill(
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ? new String[]{View.AUTOFILL_HINT_USERNAME} :
+                null);
+    }
+
+    public synchronized void requestAutoFillPassword() {
+        requestAutoFill(
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ? new String[]{View.AUTOFILL_HINT_PASSWORD} :
+            null);
+    }
+
+    public synchronized void requestAutoFill(String[] autoFillHints) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
+        if (autoFillHints == null || autoFillHints.length < 1) return;
+
+        try {
+            AutofillManager autofillManager = getAutoFillManagerService();
+            if (autofillManager != null && autofillManager.isEnabled()) {
+                // Update type that will be returned by `getAutofillType()` so that AutoFill UI is shown.
+                mAutoFillType = AUTOFILL_TYPE_TEXT;
+                // Update importance that will be returned by `getImportantForAutofill()` so that
+                // AutoFill considers the view as important.
+                mAutoFillImportance = IMPORTANT_FOR_AUTOFILL_YES;
+                // Update hints that will be returned by `getAutofillHints()` for which to show AutoFill UI.
+                mAutoFillHints = autoFillHints;
+                autofillManager.requestAutofill(this);
+            }
+        } catch (Exception e) {
+            mClient.logStackTraceWithMessage(LOG_TAG, "Failed to request Autofill", e);
+        }
+    }
+
+    public synchronized void cancelRequestAutoFill() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
+        if (mAutoFillType == AUTOFILL_TYPE_NONE) return;
+
+        try {
+            AutofillManager autofillManager = getAutoFillManagerService();
+            if (autofillManager != null && autofillManager.isEnabled()) {
+                resetAutoFill();
+                autofillManager.cancel();
+            }
+        } catch (Exception e) {
+            mClient.logStackTraceWithMessage(LOG_TAG, "Failed to cancel Autofill request", e);
+        }
+    }
+
+
 
 
 
@@ -1184,6 +1399,25 @@ public final class TerminalView extends View {
         }
     }
 
+    /** Get the currently selected text if selecting. */
+    public String getSelectedText() {
+        if (isSelectingText() && mTextSelectionCursorController != null)
+            return mTextSelectionCursorController.getSelectedText();
+        else
+            return null;
+    }
+
+    /** Get the selected text stored before "MORE" button was pressed on the context menu. */
+    @Nullable
+    public String getStoredSelectedText() {
+        return mTextSelectionCursorController != null ? mTextSelectionCursorController.getStoredSelectedText() : null;
+    }
+
+    /** Unset the selected text stored before "MORE" button was pressed on the context menu. */
+    public void unsetStoredSelectedText() {
+        if (mTextSelectionCursorController != null) mTextSelectionCursorController.unsetStoredSelectedText();
+    }
+
     private ActionMode getTextSelectionActionMode() {
         if (mTextSelectionCursorController != null) {
             return mTextSelectionCursorController.getActionMode();
@@ -1245,6 +1479,7 @@ public final class TerminalView extends View {
      * Define functions required for long hold toolbar.
      */
     private final Runnable mShowFloatingToolbar = new Runnable() {
+        @RequiresApi(api = Build.VERSION_CODES.M)
         @Override
         public void run() {
             if (getTextSelectionActionMode() != null) {
@@ -1253,6 +1488,7 @@ public final class TerminalView extends View {
         }
     };
 
+    @RequiresApi(api = Build.VERSION_CODES.M)
     private void showFloatingToolbar() {
         if (getTextSelectionActionMode() != null) {
             int delay = ViewConfiguration.getDoubleTapTimeout();
@@ -1260,6 +1496,7 @@ public final class TerminalView extends View {
         }
     }
 
+    @RequiresApi(api = Build.VERSION_CODES.M)
     void hideFloatingToolbar() {
         if (getTextSelectionActionMode() != null) {
             removeCallbacks(mShowFloatingToolbar);
@@ -1268,7 +1505,7 @@ public final class TerminalView extends View {
     }
 
     public void updateFloatingToolbarVisibility(MotionEvent event) {
-        if (getTextSelectionActionMode() != null) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && getTextSelectionActionMode() != null) {
             switch (event.getActionMasked()) {
                 case MotionEvent.ACTION_MOVE:
                     hideFloatingToolbar();

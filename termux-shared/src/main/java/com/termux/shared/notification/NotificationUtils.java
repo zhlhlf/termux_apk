@@ -51,6 +51,8 @@ public class NotificationUtils {
      *
      * @param context The {@link Context} for operations.
      * @param title The title for the notification.
+     * @param channelId The channel id for the notification.
+     * @param priority The priority for the notification.
      * @param notificationText The second line text of the notification.
      * @param notificationBigText The full text of the notification that may optionally be styled.
      * @param contentIntent The {@link PendingIntent} which should be sent when notification is clicked.
@@ -69,7 +71,9 @@ public class NotificationUtils {
         Notification.Builder builder = new Notification.Builder(context);
         builder.setContentTitle(title);
         builder.setContentText(notificationText);
-        builder.setStyle(new Notification.BigTextStyle().bigText(notificationBigText));
+        if (notificationBigText != null) {
+            builder.setStyle(new Notification.BigTextStyle().bigText(notificationBigText));
+        }
         builder.setContentIntent(contentIntent);
         builder.setDeleteIntent(deleteIntent);
 
