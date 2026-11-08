@@ -2,13 +2,18 @@ package com.termux.app.terminal;
 
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
+import android.graphics.Color;
 import android.graphics.ColorFilter;
+import android.graphics.ColorMatrix;
+import android.graphics.ColorMatrixColorFilter;
+import android.graphics.LinearGradient;
 import android.graphics.Outline;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PixelFormat;
 import android.graphics.Rect;
 import android.graphics.RectF;
+import android.graphics.Shader;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.view.View;
@@ -17,56 +22,90 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 /**
- * fork: rounded, translucent "frosted glass" background for the extra keys bar.
+ * fork: rounded "liquid glass" background for the extra keys bar.
  *
- * There is no in-window backdrop blur on Android (RenderEffect only affects the view it is set
- * on, and blurring the terminal itself would blur the text), so the wallpaper behind the bar is
- * blurred once into a small bitmap and drawn back, cropped to exactly the region the bar covers,
- * clipped to a rounded rectangle. A translucent tint and a hairline highlight go on top, which is
- * what actually reads as glass.
+ * Apple's liquid glass is mostly transparent: the backdrop stays clearly visible, gets slightly
+ * magnified and saturated, and the material itself is only a whisper of tint plus a bright
+ * specular highlight along the top edge and a soft rim. That is what this draws.
  *
- * The backdrop view must be the one that paints the wallpaper as its background, so the crop can be
- * aligned with it. If that background is not a {@link BitmapDrawable} the drawable falls back to the
- * tint alone instead of drawing a mismatched image.
+ * Android has no in-window backdrop blur (RenderEffect only blurs the view it is set on, and
+ * blurring the terminal would blur its text), so the wallpaper behind the bar is blurred once into
+ * a small bitmap and drawn back cropped to the bar rect, slightly zoomed for the lensing feel,
+ * clipped to a rounded rectangle.
+ *
+ * The backdrop view must be the one painting the wallpaper as its background, so the crop lines up.
  */
 public class FrostedGlassDrawable extends Drawable {
 
     /** Blur is computed on a downscaled copy; smaller is faster and smoother. */
     private static final int DOWNSCALE = 8;
-    private static final int BLUR_RADIUS = 6;
+    private static final int BLUR_RADIUS = 5;
     private static final int BLUR_PASSES = 3;
+
+    /** Slight magnification of the backdrop, which reads as the lensing of thick glass. */
+    private static final float LENS_ZOOM = 1.08f;
+    /** Glass makes the colours behind it pop a little. */
+    private static final float SATURATION = 1.18f;
+
+    /** Specular highlight covers the top part of the bar only. */
+    private static final float SPECULAR_HEIGHT = 0.62f;
 
     private final Paint mBitmapPaint = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
     private final Paint mTintPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint mMilkPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint mEdgePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint mSpecularPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint mRimPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
     private final Path mClipPath = new Path();
     private final RectF mBoundsF = new RectF();
     private final RectF mDstRect = new RectF();
+    private final RectF mRimRect = new RectF();
     private final Rect mSrcRect = new Rect();
 
     private final View mBackdropView;
     private final float mRadius;
-    private final float mEdgeWidth;
+    private final float mRimWidth;
+    private final int mSpecularColor;
+    private final int mRimTopColor;
+    private final int mRimBottomColor;
 
     @Nullable
     private Bitmap mBlurred;
     private int mBlurredWidth;
     private int mBlurredHeight;
 
-
-    public FrostedGlassDrawable(@NonNull View backdropView, float radius,
-                                int tintColor, int milkColor, int edgeColor, float edgeWidth) {
+    public FrostedGlassDrawable(@NonNull View backdropView, float radius, float rimWidth,
+                                int tintColor, int specularColor,
+                                int rimTopColor, int rimBottomColor) {
         mBackdropView = backdropView;
         mRadius = radius;
-        mEdgeWidth = edgeWidth;
+        mRimWidth = rimWidth;
+        mSpecularColor = specularColor;
+        mRimTopColor = rimTopColor;
+        mRimBottomColor = rimBottomColor;
 
         mTintPaint.setColor(tintColor);
-        mMilkPaint.setColor(milkColor);
-        mEdgePaint.setStyle(Paint.Style.STROKE);
-        mEdgePaint.setStrokeWidth(edgeWidth);
-        mEdgePaint.setColor(edgeColor);
+        mRimPaint.setStyle(Paint.Style.STROKE);
+        mRimPaint.setStrokeWidth(rimWidth);
+        mBitmapPaint.setColorFilter(new ColorMatrixColorFilter(saturationMatrix(SATURATION)));
+    }
+
+    private static ColorMatrixColorFilter saturationMatrix(float saturation) {
+        final ColorMatrix matrix = new ColorMatrix();
+        matrix.setSaturation(saturation);
+        return new ColorMatrixColorFilter(matrix);
+    }
+
+    @Override
+    protected void onBoundsChange(@NonNull Rect bounds) {
+        super.onBoundsChange(bounds);
+        mSpecularPaint.setShader(new LinearGradient(
+            0f, bounds.top,
+            0f, bounds.top + bounds.height() * SPECULAR_HEIGHT,
+            mSpecularColor, Color.TRANSPARENT, Shader.TileMode.CLAMP));
+        mRimPaint.setShader(new LinearGradient(
+            0f, bounds.top,
+            0f, bounds.bottom,
+            mRimTopColor, mRimBottomColor, Shader.TileMode.CLAMP));
     }
 
     @Override
@@ -81,22 +120,20 @@ public class FrostedGlassDrawable extends Drawable {
         final int saveCount = canvas.save();
         canvas.clipPath(mClipPath);
 
-        drawBlurredBackdrop(canvas, bounds);
-
+        drawBackdrop(canvas, bounds);
         canvas.drawRect(mBoundsF, mTintPaint);
-        canvas.drawRect(mBoundsF, mMilkPaint);
+        canvas.drawRect(mBoundsF, mSpecularPaint);
 
         canvas.restoreToCount(saveCount);
 
-        // Hairline edge, inset so it stays inside the rounded outline.
-        final float inset = mEdgeWidth / 2f;
-        mDstRect.set(bounds.left + inset, bounds.top + inset,
+        final float inset = mRimWidth / 2f;
+        mRimRect.set(bounds.left + inset, bounds.top + inset,
             bounds.right - inset, bounds.bottom - inset);
-        final float radius = Math.max(0f, mRadius - inset);
-        canvas.drawRoundRect(mDstRect, radius, radius, mEdgePaint);
+        final float rimRadius = Math.max(0f, mRadius - inset);
+        canvas.drawRoundRect(mRimRect, rimRadius, rimRadius, mRimPaint);
     }
 
-    private void drawBlurredBackdrop(@NonNull Canvas canvas, @NonNull Rect bounds) {
+    private void drawBackdrop(@NonNull Canvas canvas, @NonNull Rect bounds) {
         final Bitmap blurred = getBlurredBitmap();
         // The drawable is attached to the bar view; that view's position tells us which slice of
         // the backdrop is actually behind it.
@@ -112,15 +149,22 @@ public class FrostedGlassDrawable extends Drawable {
         final int y = hostLocation[1] - backdropLocation[1];
         if (x < 0 || y < 0) return;
 
-        // Map the host's on-screen rect into the downscaled bitmap, then stretch that slice over
-        // the whole drawable: the bilinear upscale is what makes it look smooth rather than blocky.
+        // Magnify around the centre of the crop: an area slightly larger than the bar is sampled
+        // and squeezed into the same rect, which gives the subtle lensing of thick glass.
+        final float zoom = 1f / LENS_ZOOM;
+        final float centreX = x + bounds.width() / 2f;
+        final float centreY = y + bounds.height() / 2f;
+        final float halfWidth = bounds.width() * zoom / 2f;
+        final float halfHeight = bounds.height() * zoom / 2f;
+
         final float scaleX = (float) blurred.getWidth() / mBlurredWidth;
         final float scaleY = (float) blurred.getHeight() / mBlurredHeight;
-        final int srcLeft = Math.round(x * scaleX);
-        final int srcTop = Math.round(y * scaleY);
-        final int srcRight = Math.round((x + bounds.width()) * scaleX);
-        final int srcBottom = Math.round((y + bounds.height()) * scaleY);
+        final int srcLeft = Math.round((centreX - halfWidth) * scaleX);
+        final int srcTop = Math.round((centreY - halfHeight) * scaleY);
+        final int srcRight = Math.round((centreX + halfWidth) * scaleX);
+        final int srcBottom = Math.round((centreY + halfHeight) * scaleY);
         if (srcRight <= srcLeft || srcBottom <= srcTop) return;
+        if (srcLeft < 0 || srcTop < 0) return;
         if (srcRight > blurred.getWidth() || srcBottom > blurred.getHeight()) return;
 
         mSrcRect.set(srcLeft, srcTop, srcRight, srcBottom);

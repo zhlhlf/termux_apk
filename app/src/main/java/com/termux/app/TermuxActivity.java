@@ -542,11 +542,12 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
         final float density = getResources().getDisplayMetrics().density;
         pager.setBackground(new FrostedGlassDrawable(
             mTermuxActivityRootView,
-            16f * density,
+            18f * density,
+            Math.max(1f, density),
             ContextCompat.getColor(this, R.color.extra_keys_glass_tint),
-            ContextCompat.getColor(this, R.color.extra_keys_glass_milk),
-            ContextCompat.getColor(this, R.color.extra_keys_glass_edge),
-            Math.max(1f, density)));
+            ContextCompat.getColor(this, R.color.extra_keys_glass_specular),
+            ContextCompat.getColor(this, R.color.extra_keys_glass_edge_top),
+            ContextCompat.getColor(this, R.color.extra_keys_glass_edge_bottom)));
         pager.setClipToOutline(true);
     }
 
