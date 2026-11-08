@@ -43,7 +43,7 @@
         <item name="extraKeysButtonTextColor">@color/white</item>
         <item name="extraKeysButtonActiveTextColor">@color/red_400</item>
         <item name="extraKeysButtonBackgroundColor">@android:color/transparent</item>
-        <item name="extraKeysButtonActiveBackgroundColor">#6656CFF7</item>
+        <item name="extraKeysButtonActiveBackgroundColor">@color/extra_keys_active_background</item>
     </style>
 
 </resources>
