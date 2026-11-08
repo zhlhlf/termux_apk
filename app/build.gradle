@@ -66,6 +66,12 @@ android {
             }
         }
 
+        // fork: only build the arm64-v8a native ABI (splits.abi.include alone does not
+        // restrict the NDK build for release variants where ABI splits are disabled).
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
+
         splits {
             abi {
                 enable ((gradle.startParameter.taskNames.any { it.contains("Debug") } && splitAPKsForDebugBuilds == "1") ||
