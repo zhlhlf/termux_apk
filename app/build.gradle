@@ -204,4 +204,12 @@ afterEvaluate {
     android.applicationVariants.all { variant ->
         variant.javaCompileProvider.get().dependsOn(downloadBootstraps)
     }
+
+    // The NDK build embeds bootstrap-aarch64.zip with .incbin, so it must run after the download.
+    // Needed for release builds, where externalNativeBuild can be scheduled before javaCompile.
+    tasks.configureEach { task ->
+        if (task.name.startsWith("externalNativeBuild") || task.name.startsWith("buildCMake")) {
+            task.dependsOn(downloadBootstraps)
+        }
+    }
 }
