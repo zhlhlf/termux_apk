@@ -38,17 +38,17 @@ import androidx.annotation.Nullable;
 public class FrostedGlassDrawable extends Drawable {
 
     /** Blur is computed on a downscaled copy; smaller is faster and smoother. */
-    private static final int DOWNSCALE = 8;
-    private static final int BLUR_RADIUS = 5;
-    private static final int BLUR_PASSES = 3;
+    private static final int DOWNSCALE = 6;
+    private static final int BLUR_RADIUS = 3;
+    private static final int BLUR_PASSES = 2;
 
     /** Slight magnification of the backdrop, which reads as the lensing of thick glass. */
-    private static final float LENS_ZOOM = 1.08f;
+    private static final float LENS_ZOOM = 1.05f;
     /** Glass makes the colours behind it pop a little. */
-    private static final float SATURATION = 1.18f;
+    private static final float SATURATION = 1.12f;
 
     /** Specular highlight covers the top part of the bar only. */
-    private static final float SPECULAR_HEIGHT = 0.62f;
+    private static final float SPECULAR_HEIGHT = 0.55f;
 
     private final Paint mBitmapPaint = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
     private final Paint mTintPaint = new Paint(Paint.ANTI_ALIAS_FLAG);

@@ -549,6 +549,7 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
             ContextCompat.getColor(this, R.color.extra_keys_glass_edge_top),
             ContextCompat.getColor(this, R.color.extra_keys_glass_edge_bottom)));
         pager.setClipToOutline(true);
+        pager.setElevation(6f * density);
     }
 
     private void setTerminalToolbarHeight() {

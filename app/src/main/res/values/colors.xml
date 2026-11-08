@@ -3,8 +3,8 @@
     <!-- Translucent accent used for pressed extra keys (fork). -->
     <color name="extra_keys_active_background">#6656CFF7</color>
     <!-- fork: extra keys bar, liquid glass (mostly transparent, with a specular top edge) -->
-    <color name="extra_keys_glass_tint">#1A56CFF7</color>
-    <color name="extra_keys_glass_specular">#4DFFFFFF</color>
-    <color name="extra_keys_glass_edge_top">#73FFFFFF</color>
-    <color name="extra_keys_glass_edge_bottom">#14FFFFFF</color>
+    <color name="extra_keys_glass_tint">#33FFFFFF</color>
+    <color name="extra_keys_glass_specular">#5CFFFFFF</color>
+    <color name="extra_keys_glass_edge_top">#8CFFFFFF</color>
+    <color name="extra_keys_glass_edge_bottom">#0FFFFFFF</color>
 </resources>
