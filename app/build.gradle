@@ -89,7 +89,8 @@ android {
     buildTypes {
         release {
             minifyEnabled true
-            shrinkResources false // Reproducible builds
+            shrinkResources true // fork: smaller APK (upstream keeps this off for reproducibility)
+            signingConfig signingConfigs.debug // fork: reuse the bundled testkey so debug installs can be updated
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
 

@@ -1,4 +1,4 @@
-name: Fork Debug Build
+name: Fork Build
 
 on:
   workflow_dispatch:
@@ -7,6 +7,13 @@ on:
         description: Branch, tag or SHA to build
         required: false
         default: main
+      variant:
+        description: Build variant
+        type: choice
+        options:
+          - release
+          - debug
+        default: release
 
 permissions:
   contents: read
@@ -26,26 +33,28 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Build arm64-v8a debug APK
+      - name: Build arm64-v8a APK
         shell: bash
         run: |
           set -euo pipefail
+          VARIANT="${{ inputs.variant }}"
+          CAP="$(echo "${VARIANT:0:1}" | tr '[:lower:]' '[:upper:]')${VARIANT:1}"
           CURRENT_VERSION_NAME_REGEX='\s+versionName "([^"]+)"$'
           CURRENT_VERSION_NAME="$(grep -m 1 -E "$CURRENT_VERSION_NAME_REGEX" ./app/build.gradle | sed -r "s/$CURRENT_VERSION_NAME_REGEX/\1/")"
           RELEASE_VERSION_NAME="v$CURRENT_VERSION_NAME+${GITHUB_SHA:0:7}"
-          APK_VERSION_TAG="$RELEASE_VERSION_NAME-apt-android-7-github-debug"
+          APK_VERSION_TAG="$RELEASE_VERSION_NAME-apt-android-7-github-$VARIANT"
           export TERMUX_APP_VERSION_NAME="${RELEASE_VERSION_NAME/v/}"
           export TERMUX_APK_VERSION_TAG="$APK_VERSION_TAG"
           export TERMUX_PACKAGE_VARIANT=apt-android-7
-          ./gradlew assembleDebug --stacktrace
+          ./gradlew "assemble${CAP}" --stacktrace
           echo "=== built ==="
-          ls -lh app/build/outputs/apk/debug
+          ls -lh "app/build/outputs/apk/${VARIANT}"
 
       - name: Upload APK
         uses: actions/upload-artifact@v6
         with:
-          name: termux-app-debug-arm64-v8a
+          name: termux-app-${{ inputs.variant }}-arm64-v8a
           path: |
-            app/build/outputs/apk/debug/*.apk
-            app/build/outputs/apk/debug/output-metadata.json
+            app/build/outputs/apk/${{ inputs.variant }}/*.apk
+            app/build/outputs/apk/${{ inputs.variant }}/output-metadata.json
           if-no-files-found: error
