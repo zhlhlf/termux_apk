@@ -1,0 +1,4 @@
+# BFSU mirror (Beijing Foreign Studies University), termux main repo
+deb https://mirrors.bfsu.edu.cn/termux/apt/termux-main stable main
+# Official repo (fallback):
+# deb https://packages-cf.termux.dev/apt/termux-main/ stable main
