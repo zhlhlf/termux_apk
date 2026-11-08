@@ -55,8 +55,6 @@ public class FrostedGlassDrawable extends Drawable {
     private int mBlurredWidth;
     private int mBlurredHeight;
 
-    @Nullable
-    private View mHostView;
 
     public FrostedGlassDrawable(@NonNull View backdropView, float radius,
                                 int tintColor, int milkColor, int edgeColor, float edgeWidth) {
@@ -69,12 +67,6 @@ public class FrostedGlassDrawable extends Drawable {
         mEdgePaint.setStyle(Paint.Style.STROKE);
         mEdgePaint.setStrokeWidth(edgeWidth);
         mEdgePaint.setColor(edgeColor);
-    }
-
-    @Override
-    public void setCallback(@Nullable Callback cb) {
-        super.setCallback(cb);
-        mHostView = cb instanceof View ? (View) cb : null;
     }
 
     @Override
@@ -106,11 +98,14 @@ public class FrostedGlassDrawable extends Drawable {
 
     private void drawBlurredBackdrop(@NonNull Canvas canvas, @NonNull Rect bounds) {
         final Bitmap blurred = getBlurredBitmap();
-        if (blurred == null || mHostView == null) return;
+        // The drawable is attached to the bar view; that view's position tells us which slice of
+        // the backdrop is actually behind it.
+        final View host = getCallback() instanceof View ? (View) getCallback() : null;
+        if (blurred == null || host == null) return;
 
         final int[] hostLocation = new int[2];
         final int[] backdropLocation = new int[2];
-        mHostView.getLocationInWindow(hostLocation);
+        host.getLocationInWindow(hostLocation);
         mBackdropView.getLocationInWindow(backdropLocation);
 
         final int x = hostLocation[0] - backdropLocation[0];
