@@ -202,7 +202,7 @@ clean {
 
 task downloadBootstraps() {
     doLast {
-        downloadBootstrap("aarch64", "https://github.com/zhlhlf/termux_apk/releases/download/bootstrap-2026.02.12-bfsu-r2/bootstrap-aarch64.zip")
+        downloadBootstrap("aarch64", "https://github.com/zhlhlf/termux_apk/releases/download/bootstrap-2026.02.12-bfsu-r3/bootstrap-aarch64.zip")
     }
 }
 
