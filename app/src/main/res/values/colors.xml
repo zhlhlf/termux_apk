@@ -2,4 +2,8 @@
 <resources>
     <!-- Translucent accent used for pressed extra keys (fork). -->
     <color name="extra_keys_active_background">#6656CFF7</color>
+    <!-- fork: extra keys bar glass -->
+    <color name="extra_keys_glass_tint">#3356CFF7</color>
+    <color name="extra_keys_glass_milk">#1AFFFFFF</color>
+    <color name="extra_keys_glass_edge">#40FFFFFF</color>
 </resources>

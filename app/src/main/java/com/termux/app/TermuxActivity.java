@@ -28,6 +28,9 @@ import android.widget.Toast;
 
 import com.termux.R;
 import com.termux.app.api.file.FileReceiverActivity;
+import androidx.core.content.ContextCompat;
+
+import com.termux.app.terminal.FrostedGlassDrawable;
 import com.termux.app.terminal.TermuxActivityRootView;
 import com.termux.app.terminal.TermuxTerminalSessionActivityClient;
 import com.termux.app.terminal.io.TermuxTerminalExtraKeys;
@@ -512,6 +515,7 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
             mTermuxTerminalViewClient, mTermuxTerminalSessionActivityClient);
 
         final ViewPager terminalToolbarViewPager = getTerminalToolbarViewPager();
+        applyFrostedGlassBackground(terminalToolbarViewPager);
         if (mPreferences.shouldShowTerminalToolbar()) terminalToolbarViewPager.setVisibility(View.VISIBLE);
 
         ViewGroup.LayoutParams layoutParams = terminalToolbarViewPager.getLayoutParams();
@@ -525,6 +529,25 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
 
         terminalToolbarViewPager.setAdapter(new TerminalToolbarViewPager.PageAdapter(this, savedTextInput));
         terminalToolbarViewPager.addOnPageChangeListener(new TerminalToolbarViewPager.OnPageChangeListener(this, terminalToolbarViewPager));
+    }
+
+    /**
+     * fork: give the extra keys bar rounded corners and a translucent, blurred "glass" look.
+     * The wallpaper painted by the root view is blurred once and cropped to the bar area, so it
+     * matches what would really be behind the bar.
+     */
+    private void applyFrostedGlassBackground(ViewPager pager) {
+        if (pager == null || mTermuxActivityRootView == null) return;
+
+        final float density = getResources().getDisplayMetrics().density;
+        pager.setBackground(new FrostedGlassDrawable(
+            mTermuxActivityRootView,
+            16f * density,
+            ContextCompat.getColor(this, R.color.extra_keys_glass_tint),
+            ContextCompat.getColor(this, R.color.extra_keys_glass_milk),
+            ContextCompat.getColor(this, R.color.extra_keys_glass_edge),
+            Math.max(1f, density)));
+        pager.setClipToOutline(true);
     }
 
     private void setTerminalToolbarHeight() {
