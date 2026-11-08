@@ -86,7 +86,7 @@ public class FrostedGlassDrawable extends Drawable {
         mTintPaint.setColor(tintColor);
         mRimPaint.setStyle(Paint.Style.STROKE);
         mRimPaint.setStrokeWidth(rimWidth);
-        mBitmapPaint.setColorFilter(new ColorMatrixColorFilter(saturationMatrix(SATURATION)));
+        mBitmapPaint.setColorFilter(saturationMatrix(SATURATION));
     }
 
     private static ColorMatrixColorFilter saturationMatrix(float saturation) {
