@@ -547,7 +547,8 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
             ContextCompat.getColor(this, R.color.extra_keys_glass_tint),
             ContextCompat.getColor(this, R.color.extra_keys_glass_specular),
             ContextCompat.getColor(this, R.color.extra_keys_glass_edge_top),
-            ContextCompat.getColor(this, R.color.extra_keys_glass_edge_bottom)));
+            ContextCompat.getColor(this, R.color.extra_keys_glass_edge_bottom),
+            density));
         pager.setClipToOutline(true);
         pager.setElevation(6f * density);
     }

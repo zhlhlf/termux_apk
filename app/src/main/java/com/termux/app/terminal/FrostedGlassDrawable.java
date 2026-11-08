@@ -38,14 +38,18 @@ import androidx.annotation.Nullable;
 public class FrostedGlassDrawable extends Drawable {
 
     /** Blur is computed on a downscaled copy; smaller is faster and smoother. */
-    private static final int DOWNSCALE = 6;
-    private static final int BLUR_RADIUS = 3;
-    private static final int BLUR_PASSES = 2;
+    private static final int DOWNSCALE = 5;
+    private static final int BLUR_RADIUS = 2;
+    private static final int BLUR_PASSES = 1;
 
     /** Slight magnification of the backdrop, which reads as the lensing of thick glass. */
-    private static final float LENS_ZOOM = 1.05f;
+    private static final float LENS_ZOOM = 1.03f;
+    /** The rim bends the backdrop much harder than the middle, which is what makes glass read as thick. */
+    private static final float EDGE_LENS_ZOOM = 1.16f;
+    /** Depth of the refracting band along the rim. */
+    private static final float EDGE_BAND_DP = 9f;
     /** Glass makes the colours behind it pop a little. */
-    private static final float SATURATION = 1.12f;
+    private static final float SATURATION = 1.08f;
 
     /** Specular highlight covers the top part of the bar only. */
     private static final float SPECULAR_HEIGHT = 0.55f;
@@ -54,8 +58,12 @@ public class FrostedGlassDrawable extends Drawable {
     private final Paint mTintPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint mSpecularPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint mRimPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint mEdgeLensPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint mInnerShadowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
     private final Path mClipPath = new Path();
+    private final Path mRingPath = new Path();
+    private final Path mInnerPath = new Path();
     private final RectF mBoundsF = new RectF();
     private final RectF mDstRect = new RectF();
     private final RectF mRimRect = new RectF();
@@ -64,6 +72,7 @@ public class FrostedGlassDrawable extends Drawable {
     private final View mBackdropView;
     private final float mRadius;
     private final float mRimWidth;
+    private final float mEdgeBand;
     private final int mSpecularColor;
     private final int mRimTopColor;
     private final int mRimBottomColor;
@@ -75,10 +84,11 @@ public class FrostedGlassDrawable extends Drawable {
 
     public FrostedGlassDrawable(@NonNull View backdropView, float radius, float rimWidth,
                                 int tintColor, int specularColor,
-                                int rimTopColor, int rimBottomColor) {
+                                int rimTopColor, int rimBottomColor, float density) {
         mBackdropView = backdropView;
         mRadius = radius;
         mRimWidth = rimWidth;
+        mEdgeBand = EDGE_BAND_DP * density;
         mSpecularColor = specularColor;
         mRimTopColor = rimTopColor;
         mRimBottomColor = rimBottomColor;
@@ -87,6 +97,7 @@ public class FrostedGlassDrawable extends Drawable {
         mRimPaint.setStyle(Paint.Style.STROKE);
         mRimPaint.setStrokeWidth(rimWidth);
         mBitmapPaint.setColorFilter(saturationMatrix(SATURATION));
+        mEdgeLensPaint.setColorFilter(saturationMatrix(SATURATION + 0.06f));
     }
 
     private static ColorMatrixColorFilter saturationMatrix(float saturation) {
@@ -106,6 +117,10 @@ public class FrostedGlassDrawable extends Drawable {
             0f, bounds.top,
             0f, bounds.bottom,
             mRimTopColor, mRimBottomColor, Shader.TileMode.CLAMP));
+        mInnerShadowPaint.setShader(new LinearGradient(
+            0f, bounds.bottom - bounds.height() * 0.55f,
+            0f, bounds.bottom,
+            Color.TRANSPARENT, 0x1F000000, Shader.TileMode.CLAMP));
     }
 
     @Override
@@ -120,9 +135,12 @@ public class FrostedGlassDrawable extends Drawable {
         final int saveCount = canvas.save();
         canvas.clipPath(mClipPath);
 
-        drawBackdrop(canvas, bounds);
+        drawBackdrop(canvas, bounds, LENS_ZOOM, 255);
+        drawEdgeRefraction(canvas, bounds);
+
         canvas.drawRect(mBoundsF, mTintPaint);
         canvas.drawRect(mBoundsF, mSpecularPaint);
+        drawInnerShadow(canvas, bounds);
 
         canvas.restoreToCount(saveCount);
 
@@ -133,7 +151,7 @@ public class FrostedGlassDrawable extends Drawable {
         canvas.drawRoundRect(mRimRect, rimRadius, rimRadius, mRimPaint);
     }
 
-    private void drawBackdrop(@NonNull Canvas canvas, @NonNull Rect bounds) {
+    private void drawBackdrop(@NonNull Canvas canvas, @NonNull Rect bounds, float zoomFactor, int alpha) {
         final Bitmap blurred = getBlurredBitmap();
         // The drawable is attached to the bar view; that view's position tells us which slice of
         // the backdrop is actually behind it.
@@ -151,7 +169,7 @@ public class FrostedGlassDrawable extends Drawable {
 
         // Magnify around the centre of the crop: an area slightly larger than the bar is sampled
         // and squeezed into the same rect, which gives the subtle lensing of thick glass.
-        final float zoom = 1f / LENS_ZOOM;
+        final float zoom = 1f / zoomFactor;
         final float centreX = x + bounds.width() / 2f;
         final float centreY = y + bounds.height() / 2f;
         final float halfWidth = bounds.width() * zoom / 2f;
@@ -159,17 +177,50 @@ public class FrostedGlassDrawable extends Drawable {
 
         final float scaleX = (float) blurred.getWidth() / mBlurredWidth;
         final float scaleY = (float) blurred.getHeight() / mBlurredHeight;
-        final int srcLeft = Math.round((centreX - halfWidth) * scaleX);
-        final int srcTop = Math.round((centreY - halfHeight) * scaleY);
-        final int srcRight = Math.round((centreX + halfWidth) * scaleX);
-        final int srcBottom = Math.round((centreY + halfHeight) * scaleY);
+        // Sampling beyond the backdrop (which happens for the widened edge band) is clamped
+        // rather than skipped, otherwise the rim would go blank near the screen edges.
+        final int srcLeft = clamp(Math.round((centreX - halfWidth) * scaleX), 0, blurred.getWidth() - 1);
+        final int srcTop = clamp(Math.round((centreY - halfHeight) * scaleY), 0, blurred.getHeight() - 1);
+        final int srcRight = clamp(Math.round((centreX + halfWidth) * scaleX), 0, blurred.getWidth());
+        final int srcBottom = clamp(Math.round((centreY + halfHeight) * scaleY), 0, blurred.getHeight());
         if (srcRight <= srcLeft || srcBottom <= srcTop) return;
-        if (srcLeft < 0 || srcTop < 0) return;
-        if (srcRight > blurred.getWidth() || srcBottom > blurred.getHeight()) return;
 
         mSrcRect.set(srcLeft, srcTop, srcRight, srcBottom);
         mDstRect.set(bounds);
+        mBitmapPaint.setAlpha(alpha);
         canvas.drawBitmap(blurred, mSrcRect, mDstRect, mBitmapPaint);
+        mBitmapPaint.setAlpha(255);
+    }
+
+    /**
+     * The rim of real glass bends light much harder than its middle. Drawing the same backdrop a
+     * second time, strongly magnified, clipped to a band along the rim, fakes that refraction and
+     * is what stops the bar from reading as a flat translucent rectangle.
+     */
+    private void drawEdgeRefraction(@NonNull Canvas canvas, @NonNull Rect bounds) {
+        final float band = mEdgeBand;
+        if (band <= 0f || bounds.width() <= band * 2.5f || bounds.height() <= band * 1.5f) return;
+
+        mRingPath.reset();
+        mRingPath.addRoundRect(mBoundsF, mRadius, mRadius, Path.Direction.CW);
+        mInnerPath.reset();
+        final float innerRadius = Math.max(1f, mRadius - band);
+        mInnerPath.addRoundRect(new RectF(
+            mBoundsF.left + band, mBoundsF.top + band,
+            mBoundsF.right - band, mBoundsF.bottom - band),
+            innerRadius, innerRadius, Path.Direction.CW);
+        mRingPath.op(mInnerPath, Path.Op.DIFFERENCE);
+
+        final int saveCount = canvas.save();
+        canvas.clipPath(mRingPath);
+        drawBackdrop(canvas, bounds, EDGE_LENS_ZOOM, 255);
+        canvas.restoreToCount(saveCount);
+    }
+
+    /** A soft shadow along the bottom inner edge gives the slab some thickness. */
+    private void drawInnerShadow(@NonNull Canvas canvas, @NonNull Rect bounds) {
+        if (mInnerShadowPaint.getShader() == null) return;
+        canvas.drawRect(mBoundsF, mInnerShadowPaint);
     }
 
     @Nullable
